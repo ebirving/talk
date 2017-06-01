@@ -16,6 +16,7 @@ import Stream from '../components/Stream';
 import Comment from './Comment';
 import {withFragments} from 'coral-framework/hocs';
 import {getDefinitionName} from 'coral-framework/utils';
+import {findCommentInEmbedQuery, insertCommentIntoEmbedQuery} from '../graphql/utils';
 
 const {showSignInDialog} = authActions;
 const {addNotification} = notificationActions;
@@ -28,6 +29,28 @@ class StreamContainer extends React.Component {
 
       // Apollo requires this, even though we don't use it...
       updateQuery: (data) => data,
+    });
+  };
+
+  subscribeToNewComments = () => {
+    this.props.data.subscribeToMore({
+      document: COMMENTS_SUBSCRIPTION,
+      variables: {
+        assetId: this.props.root.asset.id,
+      },
+      updateQuery: (prev, {subscriptionData: {data: {commentAdded}}}) => {
+        if (findCommentInEmbedQuery(prev, commentAdded.id)) {
+          return prev;
+        }
+        if (
+          commentAdded.user.id === this.props.auth.user.id &&
+          this.props.optimistic.some((o) => o.action.operationName === 'PostComment')
+        ) {
+          return prev;
+        }
+        console.log(commentAdded);
+        return insertCommentIntoEmbedQuery(prev, commentAdded);
+      }
     });
   };
 
@@ -166,6 +189,7 @@ class StreamContainer extends React.Component {
     this.countPoll = setInterval(() => {
       this.getCounts(this.props.data.variables);
     }, NEW_COMMENT_COUNT_POLL_INTERVAL);
+    this.subscribeToNewComments();
   }
 
   componentWillUnmount() {
@@ -192,6 +216,36 @@ const ascending = (a, b) => {
 };
 
 const descending = (a, b) => ascending(a, b) * -1;
+
+const commentFragment = gql`
+  fragment CoralEmbedStream_Stream_comment on Comment {
+    id
+    ...${getDefinitionName(Comment.fragments.comment)}
+    replyCount(excludeIgnored: $excludeIgnored)
+    replies {
+      nodes {
+        id
+        ...${getDefinitionName(Comment.fragments.comment)}
+      }
+      hasNextPage
+      startCursor
+      endCursor
+    }
+  }
+  ${Comment.fragments.comment}
+`;
+
+const COMMENTS_SUBSCRIPTION = gql`
+  subscription onCommentAdded($assetId: ID!, $excludeIgnored: Boolean){
+    commentAdded(asset_id: $assetId){
+      parent {
+        id
+      }
+      ...CoralEmbedStream_Stream_comment
+    }
+  }
+  ${commentFragment}
+`;
 
 const LOAD_COMMENT_COUNTS_QUERY = gql`
   query CoralEmbedStream_LoadCommentCounts($assetUrl: String, , $commentId: ID!, $assetId: ID, $hasComment: Boolean!, $excludeIgnored: Boolean) {
@@ -232,24 +286,6 @@ const LOAD_MORE_QUERY = gql`
           startCursor
           endCursor
         }
-      }
-      hasNextPage
-      startCursor
-      endCursor
-    }
-  }
-  ${Comment.fragments.comment}
-`;
-
-const commentFragment = gql`
-  fragment CoralEmbedStream_Stream_comment on Comment {
-    id
-    ...${getDefinitionName(Comment.fragments.comment)}
-    replyCount(excludeIgnored: $excludeIgnored)
-    replies {
-      nodes {
-        id
-        ...${getDefinitionName(Comment.fragments.comment)}
       }
       hasNextPage
       startCursor
@@ -323,6 +359,7 @@ const mapStateToProps = (state) => ({
   assetUrl: state.stream.assetUrl,
   activeTab: state.embed.activeTab,
   previousTab: state.embed.previousTab,
+  optimistic: state.apollo.optimistic,
 });
 
 const mapDispatchToProps = (dispatch) =>

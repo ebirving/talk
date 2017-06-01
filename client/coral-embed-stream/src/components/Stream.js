@@ -1,6 +1,5 @@
 import React, {PropTypes} from 'react';
 import LoadMore from './LoadMore';
-import NewCount from './NewCount';
 
 import Comment from '../containers/Comment';
 import SuspendedAccount from './SuspendedAccount';
@@ -141,12 +140,6 @@ class Stream extends React.Component {
               editComment={this.props.editComment}
             />
           : <div>
-              <NewCount
-                commentCount={asset.commentCount}
-                commentCountCache={commentCountCache}
-                setCommentCountCache={this.props.setCommentCountCache}
-                loadMore={this.props.loadNewComments}
-              />
               <div className="embed__stream">
                 {comments && comments.nodes.map((comment) => {
                   return commentIsIgnored(comment)
