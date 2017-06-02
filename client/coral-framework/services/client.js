@@ -2,8 +2,7 @@ import ApolloClient, {addTypename} from 'apollo-client';
 import {networkInterface} from './transport';
 import {SubscriptionClient, addGraphQLSubscriptions} from 'subscriptions-transport-ws';
 
-// TODO: replace absolute reference with something loaded from the store/page.
-const wsClient = new SubscriptionClient('ws://192.168.5.5:3000/api/v1/live', {
+const wsClient = new SubscriptionClient(`ws://${location.host}/api/v1/live`, {
   reconnect: true
 });
 

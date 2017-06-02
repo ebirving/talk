@@ -27,6 +27,49 @@ import styles from './Comment.css';
 
 const isStaff = (tags) => !tags.every((t) => t.name !== 'STAFF');
 
+const getVisibleComments = (comments, userId, idCursor) => {
+  const view = [];
+  let pastCursor = false;
+  comments.forEach((comment) => {
+    if (idCursor && !pastCursor || comment.user.id === userId) {
+      view.push(comment);
+    }
+    if (comment.id === idCursor) {
+      pastCursor = true;
+    }
+  });
+  return view;
+};
+
+function setCursors(state, props) {
+  const replies = props.comment.replies;
+  if (replies && replies.nodes.length) {
+    const idCursors = [replies.nodes[replies.nodes.length - 1].id];
+    if (replies.nodes.length >= 2) {
+      idCursors.push(replies.nodes[replies.nodes.length - 2].id);
+    }
+    return {idCursors};
+  }
+  return {idCursors: []};
+}
+
+function invalidateCursor(invalidated, state, props) {
+  const alt = invalidated === 1 ? 0 : 1;
+  const replies = props.comment.replies;
+  const idCursors = [];
+  if (state.idCursors[alt]) {
+    idCursors.push(state.idCursors[alt]);
+    const index = replies.nodes.findIndex((node) => node.id === idCursors[0]);
+    const prevInLine = replies.nodes[index - 1];
+    if (prevInLine) {
+      idCursors.push(prevInLine.id);
+    }
+  }
+  return {idCursors};
+}
+
+const hasComment = (nodes, id) => nodes.some((node) => node.id === id);
+
 // hold actions links (e.g. Reply) along the comment footer
 const ActionButton = ({children}) => {
   return (
@@ -37,6 +80,7 @@ const ActionButton = ({children}) => {
 };
 
 class Comment extends React.Component {
+
   constructor(props) {
     super(props);
 
@@ -49,7 +93,25 @@ class Comment extends React.Component {
       // Whether the comment should be editable (e.g. after a commenter clicking the 'Edit' button on their own comment)
       isEditing: false,
       replyBoxVisible: false,
+      ...setCursors({}, props),
     };
+
+  }
+
+  componentWillReceiveProps(next) {
+    const {comment: {replies: prevReplies}} = this.props;
+    const {comment: {replies: nextReplies}} = next;
+    if (
+        prevReplies && nextReplies &&
+        nextReplies.nodes.length < prevReplies.nodes.length
+    ) {
+      if (this.state.idCursors[0] && !hasComment(nextReplies.nodes, this.state.idCursors[0])) {
+        this.setState(invalidateCursor(0, this.state, next));
+      }
+      if (this.state.idCursors[1] && !hasComment(nextReplies.nodes, this.state.idCursors[1])) {
+        this.setState(invalidateCursor(1, this.state, next));
+      }
+    }
   }
 
   static propTypes = {
@@ -127,6 +189,17 @@ class Comment extends React.Component {
     }
   }
 
+  loadNewReplies = () => {
+    const {replies, replyCount, id} = this.props.comment;
+    if (replyCount > replies.nodes.length) {
+      this.props.loadMore(id).then(() => {
+        setTimeout(() => this.setState(setCursors));
+      });
+      return;
+    }
+    this.setState(setCursors);
+  };
+
   componentDidMount() {
     this._isMounted = true;
     if (this.editWindowExpiryTimeout) {
@@ -162,7 +235,6 @@ class Comment extends React.Component {
       highlighted,
       postFlag,
       postDontAgree,
-      loadMore,
       setActiveReplyBox,
       activeReplyBox,
       deleteAction,
@@ -175,6 +247,7 @@ class Comment extends React.Component {
       charCountEnable
     } = this.props;
 
+    const view = comment.replies ? getVisibleComments(comment.replies.nodes, currentUser && currentUser.id, this.state.idCursors[0]) : [];
     const flagSummary = getActionSummary('FlagActionSummary', comment);
     const dontAgreeSummary = getActionSummary(
       'DontAgreeActionSummary',
@@ -369,46 +442,44 @@ class Comment extends React.Component {
               assetId={asset.id}
             />
           : null}
-        {comment.replies &&
-          comment.replies.nodes.map((reply) => {
-            return commentIsIgnored(reply)
-              ? <IgnoredCommentTombstone key={reply.id} />
-              : <Comment
-                  data={this.props.data}
-                  root={this.props.root}
-                  setActiveReplyBox={setActiveReplyBox}
-                  disableReply={disableReply}
-                  activeReplyBox={activeReplyBox}
-                  addNotification={addNotification}
-                  parentId={comment.id}
-                  postComment={postComment}
-                  editComment={this.props.editComment}
-                  depth={depth + 1}
-                  asset={asset}
-                  highlighted={highlighted}
-                  currentUser={currentUser}
-                  postFlag={postFlag}
-                  deleteAction={deleteAction}
-                  addCommentTag={addCommentTag}
-                  removeCommentTag={removeCommentTag}
-                  ignoreUser={ignoreUser}
-                  charCountEnable={charCountEnable}
-                  maxCharCount={maxCharCount}
-                  showSignInDialog={showSignInDialog}
-                  reactKey={reply.id}
-                  key={reply.id}
-                  comment={reply}
-                />;
-          })}
-        {comment.replies &&
-          <div className="coral-load-more-replies">
-            <LoadMore
-              topLevel={false}
-              replyCount={comment.replyCount}
-              moreComments={comment.replyCount > comment.replies.nodes.length}
-              loadMore={() => loadMore(comment.id)}
-            />
-          </div>}
+        {view.map((reply) => {
+          return commentIsIgnored(reply)
+            ? <IgnoredCommentTombstone key={reply.id} />
+            : <Comment
+                data={this.props.data}
+                root={this.props.root}
+                setActiveReplyBox={setActiveReplyBox}
+                disableReply={disableReply}
+                activeReplyBox={activeReplyBox}
+                addNotification={addNotification}
+                parentId={comment.id}
+                postComment={postComment}
+                editComment={this.props.editComment}
+                depth={depth + 1}
+                asset={asset}
+                highlighted={highlighted}
+                currentUser={currentUser}
+                postFlag={postFlag}
+                deleteAction={deleteAction}
+                addCommentTag={addCommentTag}
+                removeCommentTag={removeCommentTag}
+                ignoreUser={ignoreUser}
+                charCountEnable={charCountEnable}
+                maxCharCount={maxCharCount}
+                showSignInDialog={showSignInDialog}
+                reactKey={reply.id}
+                key={reply.id}
+                comment={reply}
+              />;
+        })}
+        <div className="coral-load-more-replies">
+          <LoadMore
+            topLevel={false}
+            replyCount={comment.replyCount}
+            moreComments={comment.replyCount > view.length}
+            loadMore={this.loadNewReplies}
+          />
+        </div>
       </div>
     );
   }

@@ -78,7 +78,7 @@ function findAndRemoveComment(parent, id) {
   };
 
   if (parent[countField] && next.length !== connection.nodes.length) {
-    changes[countField] = {$set: changes[countField] - 1};
+    changes[countField] = {$set: parent[countField] - 1};
   }
   return update(parent, changes);
 }

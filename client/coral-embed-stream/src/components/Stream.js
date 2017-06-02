@@ -12,9 +12,84 @@ import {ModerationLink} from 'coral-plugin-moderation';
 import CommentBox from 'coral-plugin-commentbox/CommentBox';
 import QuestionBox from 'coral-plugin-questionbox/QuestionBox';
 import IgnoredCommentTombstone from './IgnoredCommentTombstone';
+import NewCount from './NewCount';
 import t, {timeago} from 'coral-framework/services/i18n';
 
+const getVisibleComments = (comments, userId, idCursor) => {
+  const view = [];
+  let pastCursor = false;
+  comments.forEach((comment) => {
+    if (comment.id === idCursor) {
+      pastCursor = true;
+    }
+    if (pastCursor || comment.user.id === userId) {
+      view.push(comment);
+    }
+  });
+  return view;
+};
+
+function setCursors(state, props) {
+  const comments = props.root.asset.comments;
+  if (comments && comments.nodes.length) {
+    const idCursors = [comments.nodes[0].id];
+    if (comments.nodes[1]) {
+      idCursors.push(comments.nodes[1].id);
+    }
+    return {idCursors};
+  }
+  return {idCursors: []};
+}
+
+function invalidateCursor(invalidated, state, props) {
+  const alt = invalidated === 1 ? 0 : 1;
+  const comments = props.root.asset.comments;
+  const idCursors = [];
+  if (state.idCursors[alt]) {
+    idCursors.push(state.idCursors[alt]);
+    const index = comments.nodes.findIndex((node) => node.id === idCursors[0]);
+    const nextInLine = comments.nodes[index + 1];
+    if (nextInLine) {
+      idCursors.push(nextInLine.id);
+    }
+  }
+  return {idCursors};
+}
+
+const hasComment = (nodes, id) => nodes.some((node) => node.id === id);
+
 class Stream extends React.Component {
+
+  constructor(props) {
+    super(props);
+    this.state = setCursors(this.state, props);
+  }
+
+  componentWillReceiveProps(next) {
+    const {root: {asset: {comments: prevComments}}} = this.props;
+    const {root: {asset: {comments: nextComments}}} = next;
+
+    if (!prevComments && nextComments) {
+      this.setState(setCursors);
+      return;
+    }
+    if (
+        prevComments && nextComments &&
+        nextComments.nodes.length < prevComments.nodes.length
+    ) {
+      if (this.state.idCursors[0] && !hasComment(nextComments.nodes, this.state.idCursors[0])) {
+        this.setState(invalidateCursor(0, this.state, next));
+      }
+      if (this.state.idCursors[1] && !hasComment(nextComments.nodes, this.state.idCursors[1])) {
+        this.setState(invalidateCursor(1, this.state, next));
+      }
+    }
+  }
+
+  viewNewComments = () => {
+    this.setState(setCursors);
+  };
+
   setActiveReplyBox = (reactKey) => {
     if (!this.props.auth.user) {
       this.props.showSignInDialog();
@@ -37,9 +112,9 @@ class Stream extends React.Component {
       pluginProps,
       ignoreUser,
       auth: {loggedIn, user},
-      commentCountCache,
       editName
     } = this.props;
+    const view = comments ? getVisibleComments(comments.nodes, user && user.id, this.state.idCursors[0]) : [];
     const open = asset.closedAt === null;
 
     // even though the permalinked comment is the highlighted one, we're displaying its parent + replies
@@ -96,8 +171,6 @@ class Stream extends React.Component {
                   postComment={this.props.postComment}
                   appendItemArray={this.props.appendItemArray}
                   updateItem={this.props.updateItem}
-                  setCommentCountCache={this.props.setCommentCountCache}
-                  commentCountCache={commentCountCache}
                   assetId={asset.id}
                   premod={asset.settings.moderation}
                   isReply={false}
@@ -140,8 +213,12 @@ class Stream extends React.Component {
               editComment={this.props.editComment}
             />
           : <div>
+              <NewCount
+                count={comments.nodes.length - view.length}
+                loadMore={this.viewNewComments}
+              />
               <div className="embed__stream">
-                {comments && comments.nodes.map((comment) => {
+                {view.map((comment) => {
                   return commentIsIgnored(comment)
                     ? <IgnoredCommentTombstone key={comment.id} />
                     : <Comment
